@@ -1,5 +1,6 @@
 import { app, BrowserWindow, globalShortcut, dialog, ipcMain } from "electron";
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { spawn } from "node:child_process";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Aligner, tokenize } from "../core/aligner.ts";
@@ -92,7 +93,19 @@ app.whenReady().then(() => {
     "Ctrl+Alt+R": () => { aligner?.jumpTo(0); push(); },
   };
   for (const [k, fn] of Object.entries(keys)) globalShortcut.register(k, fn);
+  startSidecar();
   connectStt();
 });
 
+// shortcut: caminho fixo da versão pessoal (venv fica fora do .exe); no SaaS, empacotar o motor.
+const sttDir = process.env.TELEPROMPTER_STT ?? "E:\\Projetos\\teleprompter\\stt";
+let sidecar;
+function startSidecar() {
+  const py = join(sttDir, ".venv", "Scripts", "python.exe");
+  if (!existsSync(py)) return;
+  sidecar = spawn(py, [join(sttDir, "server.py")], { windowsHide: true, stdio: "ignore" });
+  sidecar.on("exit", () => (sidecar = null));
+}
+
+app.on("will-quit", () => sidecar?.kill());
 app.on("window-all-closed", () => app.quit());

@@ -1,3 +1,4 @@
 node_modules
 stt/.venv
 __pycache__
+dist

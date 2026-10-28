@@ -5,9 +5,32 @@
   "scripts": {
     "test": "node --test core/",
     "start": "electron app/main.mjs",
-    "stt": "stt/.venv/Scripts/python stt/server.py"
+    "stt": "stt/.venv/Scripts/python stt/server.py",
+    "dist": "electron-builder"
   },
   "devDependencies": {
-    "electron": "^45.1.0"
-  }
+    "electron": "^45.1.0",
+    "electron-builder": "^26.18.0"
+  },
+  "build": {
+    "appId": "com.leonardo.teleprompter",
+    "productName": "Teleprompter",
+    "files": [
+      "app/**",
+      "core/aligner.ts",
+      "package.json"
+    ],
+    "win": {
+      "icon": "build/icon.ico",
+      "target": "portable"
+    },
+    "portable": {
+      "artifactName": "Teleprompter.exe"
+    },
+    "directories": {
+      "output": "dist"
+    }
+  },
+  "main": "app/main.mjs",
+  "version": "0.1.0"
 }
