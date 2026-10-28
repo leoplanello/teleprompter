@@ -46,7 +46,16 @@
 <div class="row two"><span>Microfone</span><select id="device"></select></div>
 <label class="chk"><input type="checkbox" id="lang-pt"> Português</label>
 <label class="chk"><input type="checkbox" id="lang-en"> Inglês</label>
-<div class="hint">Os dois idiomas podem ficar ligados ao mesmo tempo. Trocar microfone ou idioma reinicia o motor de voz (alguns segundos).</div>
+<label class="chk"><input type="checkbox" id="scriptMode"> Reconhecimento guiado pelo roteiro (mais rápido e mais preciso)</label>
+<div class="hint">Os dois idiomas podem ficar ligados ao mesmo tempo. Trocar microfone ou idioma reinicia o motor de voz (alguns segundos). O modo guiado só entende as palavras do roteiro (mais números e nomes comuns); desligue se for improvisar muito com palavras fora dele.</div>
+
+<h2>Atualização</h2>
+<div id="ver">Versão —</div>
+<div class="btns">
+  <button id="chk">Verificar atualização</button>
+  <button class="p" id="inst" style="display:none">Baixar e reiniciar</button>
+</div>
+<div class="hint" id="updmsg"></div>
 
 <h2>Roteiro</h2>
 <textarea id="script" spellcheck="false"></textarea>
@@ -64,7 +73,10 @@ const FONTS = ["Segoe UI", "Arial", "Calibri", "Verdana", "Trebuchet MS", "Georg
 const unit = { fontSize: "px", width: "px", lines: "", opacity: "" };
 
 (async () => {
-  const { cfg, script, stt } = await tp.get();
+  const { cfg, script, stt, upd, version } = await tp.get();
+  window.ver = version; showUpd(upd);
+  $("chk").onclick = () => tp.checkUpdate();
+  $("inst").onclick = () => tp.installUpdate();
   for (const k of ["fontSize", "lines", "width", "opacity"]) {
     const el = $(k), out = el.nextElementSibling;
     el.value = cfg[k]; out.textContent = cfg[k] + unit[k];
@@ -73,7 +85,7 @@ const unit = { fontSize: "px", width: "px", lines: "", opacity: "" };
   $("fontFamily").innerHTML = FONTS.map((f) => `<option>${f}</option>`).join("");
   $("fontFamily").value = cfg.fontFamily; $("fontFamily").onchange = (e) => tp.set("fontFamily", e.target.value);
   $("color").value = cfg.color; $("color").oninput = (e) => tp.set("color", e.target.value);
-  for (const k of ["showTaskbar", "showHeard", "protectCapture"]) {
+  for (const k of ["showTaskbar", "showHeard", "protectCapture", "scriptMode"]) {
     $(k).checked = cfg[k]; $(k).onchange = (e) => tp.set(k, e.target.checked);
   }
   for (const l of ["pt", "en"]) {
@@ -102,6 +114,19 @@ function show(s) {
                                     : "Motor de voz carregando ou desligado…";
 }
 tp.onStt(show);
+
+function showUpd(u) {
+  $("ver").textContent = `Versão instalada: ${window.ver}`;
+  $("inst").style.display = u.phase === "available" ? "" : "none";
+  $("chk").disabled = ["checking", "downloading", "restarting"].includes(u.phase);
+  $("inst").textContent = `Baixar e reiniciar (v${u.latest})`;
+  $("updmsg").textContent = {
+    checking: "Verificando…", uptodate: "Você já está na versão mais recente.",
+    available: `Nova versão ${u.latest} disponível.`, downloading: `Baixando… ${u.pct}%`,
+    restarting: u.msg, error: u.msg, idle: "",
+  }[u.phase];
+}
+tp.onUpdate(showUpd);
 </script>
 </body>
 </html>

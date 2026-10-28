@@ -8,12 +8,13 @@
   #box { position: fixed; inset: 0; border-radius: 14px; background: rgba(0,0,0,var(--bg)); -webkit-app-region: drag; }
   body.locked #box { -webkit-app-region: no-drag; }
   #text { position: absolute; left: 22px; right: 22px; top: 12px; bottom: 30px; overflow: hidden; color: var(--fg); font-size: var(--fs); line-height: 1.35; -webkit-app-region: no-drag; }
-  .w { opacity: .35; } .w.cur { opacity: 1; font-weight: 600; } .w.next { opacity: .85; }
-  #foot { position: absolute; left: 12px; right: 12px; bottom: 6px; height: 20px; display: flex; align-items: center; gap: 8px; font: 12px "Segoe UI", sans-serif; color: rgba(255,255,255,.75); -webkit-app-region: no-drag; }
-  #gear { cursor: pointer; font-size: 15px; line-height: 1; opacity: .8; border: 0; background: none; color: inherit; padding: 0 2px; }
-  #gear:hover { opacity: 1; }
+  .w { opacity: .85; } .w.done { opacity: .35; } .w.cur { opacity: 1; font-weight: 600; }
+  #foot { position: absolute; left: 12px; right: 10px; bottom: 6px; height: 20px; display: flex; align-items: center; gap: 8px; font: 12px "Segoe UI", sans-serif; color: rgba(255,255,255,.75); -webkit-app-region: no-drag; }
+  .ib { cursor: pointer; font-size: 15px; line-height: 1; opacity: .8; border: 0; background: none; color: inherit; padding: 0 3px; }
+  .ib:hover { opacity: 1; } #close:hover { color: #ff6b6b; }
+  #upd { display: none; font-size: 12px; background: #2563eb; color: #fff; border-radius: 10px; padding: 1px 8px; opacity: 1; }
   #lvl { width: 54px; height: 6px; border-radius: 3px; background: rgba(255,255,255,.2); overflow: hidden; flex: none; }
-  #lvl i { display: block; height: 100%; width: 0; background: #3ddc84; transition: width .08s; }
+  #lvl i { display: block; height: 100%; width: 0; background: #3ddc84; }
   #heard { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; }
   #dot { width: 9px; height: 9px; border-radius: 50%; background: #3ddc84; flex: none; }
   #dot.imp { background: #ffb020; } #dot.off { background: #e5484d; }
@@ -23,38 +24,65 @@
 <div id="box">
   <div id="text"></div>
   <div id="foot">
-    <button id="gear" title="Configurações (Ctrl+Alt+S)">⚙</button>
+    <button class="ib" id="gear" title="Configurações (Ctrl+Alt+S)">⚙</button>
+    <button class="ib" id="upd" title="Nova versão disponível">↑ atualizar</button>
     <div id="lvl"><i></i></div>
     <div id="heard"></div>
     <div id="dot" class="off"></div>
+    <button class="ib" id="close" title="Fechar (Ctrl+Alt+Q)">✕</button>
   </div>
 </div>
 <script>
 const $ = (id) => document.getElementById(id), text = $("text");
-let state = "following", connected = false;
+let state = "following", connected = false, spans = [], chunks = [], cur = -1, showHeard = true, lastTarget = 0;
 const dot = () => ($("dot").className = !connected ? "off" : state === "improvising" ? "imp" : "");
-$("gear").onclick = () => tp.openSettings();
+$("gear").onclick = $("upd").onclick = () => tp.openSettings();
+$("close").onclick = () => tp.quit();
 tp.onClickThrough((on) => document.body.classList.toggle("locked", on));
+tp.onUpdate((u) => ($("upd").style.display = u.phase === "available" ? "" : "none"));
+
 tp.onStt((s) => {
   connected = s.connected;
   $("lvl").firstChild.style.width = Math.round(s.level * 100) + "%";
-  $("heard").textContent = !s.connected ? "carregando o motor de voz…" : s.heard ? "‪" + s.heard : "ouvindo… (" + s.device + ")";
-  $("heard").style.display = window.showHeard === false ? "none" : "";
+  $("heard").style.display = showHeard ? "" : "none";
+  $("heard").textContent = !s.connected ? "carregando o motor de voz…"
+    : s.heard ? "‪" + s.heard.replaceAll("[unk]", "…") : "ouvindo… (" + s.device + ")";
   dot();
 });
-tp.onState(({ chunks, pos, state: st, cfg }) => {
-  window.showHeard = cfg.showHeard; state = st; dot();
+
+tp.onCfg((cfg) => {
+  showHeard = cfg.showHeard;
   const r = document.documentElement.style;
-  r.setProperty("--bg", cfg.opacity); r.setProperty("--fg", cfg.color); r.setProperty("--fs", cfg.fontSize + "px"); r.setProperty("--ff", `"${cfg.fontFamily}"`);
-  if (text.children.length !== chunks.length || text.textContent.trim() !== chunks.map((c) => c.t).join(" ")) {
-    text.replaceChildren(...chunks.map((c) => Object.assign(document.createElement("span"), { className: "w", textContent: c.t + " " })));
-  }
-  const spans = text.children;
-  let cur = chunks.findIndex((c) => pos < c.b); if (cur < 0) cur = chunks.length - 1;
-  for (let i = 0; i < spans.length; i++) spans[i].className = "w" + (i === cur ? " cur" : i > cur ? " next" : "");
-  const el = spans[cur];
-  if (el) text.scrollTop = el.offsetTop - text.clientHeight * 0.3;
+  r.setProperty("--bg", cfg.opacity); r.setProperty("--fg", cfg.color);
+  r.setProperty("--fs", cfg.fontSize + "px"); r.setProperty("--ff", `"${cfg.fontFamily}"`);
+  scroll();
 });
+
+tp.onScript((c) => {
+  chunks = c;
+  spans = c.map((x) => Object.assign(document.createElement("span"), { className: "w", textContent: x.t + " " }));
+  text.replaceChildren(...spans);
+  cur = -1;
+});
+
+// só mexe nas palavras entre a posição antiga e a nova: roteiro longo não pesa
+tp.onPos(({ pos, state: st }) => {
+  state = st; dot();
+  let n = chunks.findIndex((c) => pos < c.b); if (n < 0) n = chunks.length - 1;
+  if (n === cur) return;
+  const lo = Math.max(0, Math.min(cur, n)), hi = Math.min(spans.length - 1, Math.max(cur, n));
+  if (cur < 0) for (let i = 0; i < spans.length; i++) spans[i].className = i < n ? "w done" : "w";
+  else for (let i = lo; i <= hi; i++) spans[i].className = i < n ? "w done" : "w";
+  if (spans[n]) spans[n].className = "w cur";
+  cur = n;
+  scroll();
+});
+
+function scroll() {
+  const el = spans[cur]; if (!el) return;
+  const target = el.offsetTop - text.clientHeight * 0.3;
+  if (Math.abs(target - text.scrollTop) > 4) text.scrollTop = target;
+}
 </script>
 </body>
 </html>
