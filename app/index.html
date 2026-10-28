@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'">
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; font-family: "Segoe UI", sans-serif; }
+  #box { position: fixed; inset: 0; border-radius: 14px; background: rgba(0,0,0,var(--bg)); -webkit-app-region: drag; }
+  body.locked #box { -webkit-app-region: no-drag; }
+  #text { position: absolute; inset: 14px 22px; overflow: hidden; color: var(--fg); font-size: var(--fs); line-height: 1.35; -webkit-app-region: no-drag; }
+  .w { opacity: .35; } .w.cur { opacity: 1; font-weight: 600; } .w.next { opacity: .85; }
+  #dot { position: absolute; right: 10px; top: 8px; width: 10px; height: 10px; border-radius: 50%; background: #3ddc84; }
+  #dot.imp { background: #ffb020; }
+</style>
+</head>
+<body>
+<div id="box"><div id="text"></div><div id="dot"></div></div>
+<script>
+const $ = (id) => document.getElementById(id), text = $("text");
+let built = null;
+tp.onClickThrough((on) => document.body.classList.toggle("locked", on));
+tp.onState(({ chunks, pos, state, cfg }) => {
+  const r = document.documentElement.style;
+  r.setProperty("--bg", cfg.opacity); r.setProperty("--fg", cfg.color); r.setProperty("--fs", cfg.fontSize + "px");
+  if (built !== chunks) { // só reconstrói se o roteiro mudou (push repete a mesma referência? não: IPC clona)
+    text.replaceChildren(...chunks.map((c) => Object.assign(document.createElement("span"), { className: "w", textContent: c.t + " " })));
+    built = null;
+  }
+  const spans = text.children;
+  let cur = chunks.findIndex((c) => pos < c.b); if (cur < 0) cur = chunks.length - 1;
+  for (let i = 0; i < spans.length; i++) spans[i].className = "w" + (i === cur ? " cur" : i > cur ? " next" : "");
+  const el = spans[cur];
+  if (el) text.scrollTop = el.offsetTop - text.clientHeight / (cfg.lines + 1) * 1.2;
+  $("dot").className = state === "improvising" ? "imp" : "";
+});
+</script>
+</body>
+</html>

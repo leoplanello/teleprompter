@@ -1,0 +1,4 @@
+faster-whisper==1.2.1
+sounddevice==0.5.6
+websockets==17.3
+numpy

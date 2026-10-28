@@ -1,0 +1,13 @@
+{
+  "name": "teleprompter",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test core/",
+    "start": "electron app/main.mjs",
+    "stt": "stt/.venv/Scripts/python stt/server.py"
+  },
+  "devDependencies": {
+    "electron": "^45.1.0"
+  }
+}
