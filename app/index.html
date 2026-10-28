@@ -4,34 +4,56 @@
 <meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'">
 <style>
-  html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; font-family: "Segoe UI", sans-serif; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; font-family: var(--ff), sans-serif; }
   #box { position: fixed; inset: 0; border-radius: 14px; background: rgba(0,0,0,var(--bg)); -webkit-app-region: drag; }
   body.locked #box { -webkit-app-region: no-drag; }
-  #text { position: absolute; inset: 14px 22px; overflow: hidden; color: var(--fg); font-size: var(--fs); line-height: 1.35; -webkit-app-region: no-drag; }
+  #text { position: absolute; left: 22px; right: 22px; top: 12px; bottom: 30px; overflow: hidden; color: var(--fg); font-size: var(--fs); line-height: 1.35; -webkit-app-region: no-drag; }
   .w { opacity: .35; } .w.cur { opacity: 1; font-weight: 600; } .w.next { opacity: .85; }
-  #dot { position: absolute; right: 10px; top: 8px; width: 10px; height: 10px; border-radius: 50%; background: #3ddc84; }
-  #dot.imp { background: #ffb020; }
+  #foot { position: absolute; left: 12px; right: 12px; bottom: 6px; height: 20px; display: flex; align-items: center; gap: 8px; font: 12px "Segoe UI", sans-serif; color: rgba(255,255,255,.75); -webkit-app-region: no-drag; }
+  #gear { cursor: pointer; font-size: 15px; line-height: 1; opacity: .8; border: 0; background: none; color: inherit; padding: 0 2px; }
+  #gear:hover { opacity: 1; }
+  #lvl { width: 54px; height: 6px; border-radius: 3px; background: rgba(255,255,255,.2); overflow: hidden; flex: none; }
+  #lvl i { display: block; height: 100%; width: 0; background: #3ddc84; transition: width .08s; }
+  #heard { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; }
+  #dot { width: 9px; height: 9px; border-radius: 50%; background: #3ddc84; flex: none; }
+  #dot.imp { background: #ffb020; } #dot.off { background: #e5484d; }
 </style>
 </head>
 <body>
-<div id="box"><div id="text"></div><div id="dot"></div></div>
+<div id="box">
+  <div id="text"></div>
+  <div id="foot">
+    <button id="gear" title="Configurações (Ctrl+Alt+S)">⚙</button>
+    <div id="lvl"><i></i></div>
+    <div id="heard"></div>
+    <div id="dot" class="off"></div>
+  </div>
+</div>
 <script>
 const $ = (id) => document.getElementById(id), text = $("text");
-let built = null;
+let state = "following", connected = false;
+const dot = () => ($("dot").className = !connected ? "off" : state === "improvising" ? "imp" : "");
+$("gear").onclick = () => tp.openSettings();
 tp.onClickThrough((on) => document.body.classList.toggle("locked", on));
-tp.onState(({ chunks, pos, state, cfg }) => {
+tp.onStt((s) => {
+  connected = s.connected;
+  $("lvl").firstChild.style.width = Math.round(s.level * 100) + "%";
+  $("heard").textContent = !s.connected ? "carregando o motor de voz…" : s.heard ? "‪" + s.heard : "ouvindo… (" + s.device + ")";
+  $("heard").style.display = window.showHeard === false ? "none" : "";
+  dot();
+});
+tp.onState(({ chunks, pos, state: st, cfg }) => {
+  window.showHeard = cfg.showHeard; state = st; dot();
   const r = document.documentElement.style;
-  r.setProperty("--bg", cfg.opacity); r.setProperty("--fg", cfg.color); r.setProperty("--fs", cfg.fontSize + "px");
-  if (built !== chunks) { // só reconstrói se o roteiro mudou (push repete a mesma referência? não: IPC clona)
+  r.setProperty("--bg", cfg.opacity); r.setProperty("--fg", cfg.color); r.setProperty("--fs", cfg.fontSize + "px"); r.setProperty("--ff", `"${cfg.fontFamily}"`);
+  if (text.children.length !== chunks.length || text.textContent.trim() !== chunks.map((c) => c.t).join(" ")) {
     text.replaceChildren(...chunks.map((c) => Object.assign(document.createElement("span"), { className: "w", textContent: c.t + " " })));
-    built = null;
   }
   const spans = text.children;
   let cur = chunks.findIndex((c) => pos < c.b); if (cur < 0) cur = chunks.length - 1;
   for (let i = 0; i < spans.length; i++) spans[i].className = "w" + (i === cur ? " cur" : i > cur ? " next" : "");
   const el = spans[cur];
-  if (el) text.scrollTop = el.offsetTop - text.clientHeight / (cfg.lines + 1) * 1.2;
-  $("dot").className = state === "improvising" ? "imp" : "";
+  if (el) text.scrollTop = el.offsetTop - text.clientHeight * 0.3;
 });
 </script>
 </body>

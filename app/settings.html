@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'">
+<title>Configurações do Teleprompter</title>
+<style>
+  :root { --bg:#fff; --fg:#1b1b1f; --mut:#6b6b76; --line:#dcdce2; --acc:#2563eb; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#16161a; --fg:#ececf1; --mut:#9a9aa6; --line:#2e2e36; --acc:#6ea0ff; } }
+  body { margin:0; padding:20px 24px 28px; background:var(--bg); color:var(--fg); font:14px "Segoe UI",sans-serif; }
+  h1 { font-size:18px; margin:0 0 4px; } h2 { font-size:13px; text-transform:uppercase; letter-spacing:.05em; color:var(--mut); margin:22px 0 8px; border-top:1px solid var(--line); padding-top:14px; }
+  .row { display:grid; grid-template-columns:150px 1fr 54px; align-items:center; gap:10px; margin:8px 0; }
+  .row.two { grid-template-columns:150px 1fr; }
+  output { text-align:right; color:var(--mut); font-variant-numeric:tabular-nums; }
+  input[type=range] { width:100%; accent-color:var(--acc); }
+  select, textarea, input[type=color] { font:inherit; color:inherit; background:transparent; border:1px solid var(--line); border-radius:6px; padding:6px 8px; }
+  select { width:100%; } input[type=color] { padding:0; height:30px; width:60px; }
+  textarea { width:100%; box-sizing:border-box; height:230px; resize:vertical; line-height:1.4; }
+  label.chk { display:flex; gap:8px; align-items:center; margin:8px 0; }
+  button { font:inherit; padding:6px 12px; border:1px solid var(--line); border-radius:6px; background:transparent; color:inherit; cursor:pointer; }
+  button.p { background:var(--acc); border-color:var(--acc); color:#fff; } button:hover { filter:brightness(1.1); }
+  .btns { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
+  #st { padding:8px 10px; border-radius:6px; border:1px solid var(--line); color:var(--mut); }
+  .hint { color:var(--mut); font-size:12px; margin-top:4px; }
+</style>
+</head>
+<body>
+<h1>Configurações</h1>
+<div id="st">…</div>
+
+<h2>Texto na tela</h2>
+<div class="row"><span>Tamanho da fonte</span><input type="range" id="fontSize" min="14" max="96" step="1"><output></output></div>
+<div class="row"><span>Linhas visíveis</span><input type="range" id="lines" min="1" max="10" step="1"><output></output></div>
+<div class="row"><span>Largura da janela</span><input type="range" id="width" min="400" max="2000" step="10"><output></output></div>
+<div class="row"><span>Opacidade do fundo</span><input type="range" id="opacity" min="0" max="1" step="0.01"><output></output></div>
+<div class="row two"><span>Fonte</span><select id="fontFamily"></select></div>
+<div class="row two"><span>Cor do texto</span><input type="color" id="color"></div>
+
+<h2>Janela</h2>
+<label class="chk"><input type="checkbox" id="showTaskbar"> Mostrar o ícone na barra de tarefas</label>
+<label class="chk"><input type="checkbox" id="showHeard"> Mostrar o que o microfone está ouvindo</label>
+<label class="chk"><input type="checkbox" id="protectCapture"> Esconder a janela de gravações e compartilhamento de tela</label>
+<div class="hint">Atalhos: Ctrl+Alt+T clicar através · H ocultar · ←/→ pular frase · R voltar ao início · S abrir esta janela</div>
+
+<h2>Voz</h2>
+<div class="row two"><span>Microfone</span><select id="device"></select></div>
+<label class="chk"><input type="checkbox" id="lang-pt"> Português</label>
+<label class="chk"><input type="checkbox" id="lang-en"> Inglês</label>
+<div class="hint">Os dois idiomas podem ficar ligados ao mesmo tempo. Trocar microfone ou idioma reinicia o motor de voz (alguns segundos).</div>
+
+<h2>Roteiro</h2>
+<textarea id="script" spellcheck="false"></textarea>
+<div class="btns">
+  <button class="p" id="apply">Aplicar roteiro</button>
+  <button id="open">Abrir arquivo…</button>
+  <button id="save">Salvar em arquivo…</button>
+  <button id="reset">Voltar ao início</button>
+</div>
+<div class="hint">Ao aplicar, a posição volta ao início. Ctrl+Enter também aplica.</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const FONTS = ["Segoe UI", "Arial", "Calibri", "Verdana", "Trebuchet MS", "Georgia", "Times New Roman", "Consolas"];
+const unit = { fontSize: "px", width: "px", lines: "", opacity: "" };
+
+(async () => {
+  const { cfg, script, stt } = await tp.get();
+  for (const k of ["fontSize", "lines", "width", "opacity"]) {
+    const el = $(k), out = el.nextElementSibling;
+    el.value = cfg[k]; out.textContent = cfg[k] + unit[k];
+    el.oninput = () => { out.textContent = el.value + unit[k]; tp.set(k, +el.value); };
+  }
+  $("fontFamily").innerHTML = FONTS.map((f) => `<option>${f}</option>`).join("");
+  $("fontFamily").value = cfg.fontFamily; $("fontFamily").onchange = (e) => tp.set("fontFamily", e.target.value);
+  $("color").value = cfg.color; $("color").oninput = (e) => tp.set("color", e.target.value);
+  for (const k of ["showTaskbar", "showHeard", "protectCapture"]) {
+    $(k).checked = cfg[k]; $(k).onchange = (e) => tp.set(k, e.target.checked);
+  }
+  for (const l of ["pt", "en"]) {
+    $("lang-" + l).checked = cfg.langs.includes(l);
+    $("lang-" + l).onchange = () => {
+      const on = ["pt", "en"].filter((x) => $("lang-" + x).checked);
+      if (!on.length) { $("lang-" + l).checked = true; return; } // pelo menos um idioma
+      tp.set("langs", on);
+    };
+  }
+  const devs = await tp.devices();
+  $("device").innerHTML = `<option value="">Padrão do Windows</option>` + devs.map((d) => `<option value="${d.id}">${d.name}</option>`).join("");
+  $("device").value = cfg.device ?? ""; $("device").onchange = (e) => tp.set("device", e.target.value === "" ? null : +e.target.value);
+
+  $("script").value = script;
+  $("apply").onclick = () => tp.setScript($("script").value);
+  $("script").onkeydown = (e) => { if (e.ctrlKey && e.key === "Enter") tp.setScript($("script").value); };
+  $("open").onclick = async () => { const t = await tp.openScript(); if (t !== null) { $("script").value = t; tp.setScript(t); } };
+  $("save").onclick = () => tp.saveScript($("script").value);
+  $("reset").onclick = () => tp.resetPos();
+  show(stt);
+})();
+
+function show(s) {
+  $("st").textContent = s.connected ? `Motor de voz ligado · microfone: ${s.device} · idiomas: ${s.langs.join(", ")} · nível ${Math.round(s.level * 100)}%`
+                                    : "Motor de voz carregando ou desligado…";
+}
+tp.onStt(show);
+</script>
+</body>
+</html>

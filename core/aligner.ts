@@ -55,7 +55,27 @@ export class Aligner {
 
   // Passa um trecho já reconhecido; devolve a posição atual.
   feed(transcript: string): number {
+    const { matched } = this.consume(tokenize(transcript));
+    this.state = matched ? "following" : "improvising";
+    return this.pos;
+  }
+
+  // Hipóteses parciais que crescem (streaming): só as palavras ainda não consumidas entram.
+  private consumed: Record<string, number> = {};
+  feedStream(key: string, transcript: string, final = false): number {
     const h = tokenize(transcript);
+    const c = Math.min(this.consumed[key] ?? 0, h.length);
+    const tail = h.slice(c);
+    const { matched, end } = this.consume(tail);
+    if (matched) {
+      this.consumed[key] = c + end;
+      this.state = "following";
+    } else if (tail.length >= 4) this.state = "improvising";
+    if (final) this.consumed[key] = 0;
+    return this.pos;
+  }
+
+  private consume(h: string[]) {
     let idx = 0;
     let matched = false;
     while (idx < h.length) {
@@ -65,8 +85,7 @@ export class Aligner {
       idx = best.i + best.len;
       matched = true;
     }
-    this.state = matched ? "following" : "improvising";
-    return this.pos;
+    return { matched, end: idx };
   }
 
   // Maior sequência de palavras ouvidas (a partir de `from`) que casa com o roteiro à frente de pos.
@@ -86,7 +105,9 @@ export class Aligner {
           k++;
         }
         const dist = s - this.pos;
-        if (k < (dist <= this.near ? 2 : 3)) continue;
+        // a próxima palavra esperada, se longa, vale sozinha: latência de uma palavra a menos
+        const need = dist === 0 && sc[s].length >= 4 ? 1 : dist <= this.near ? 2 : 3;
+        if (k < need) continue;
         if (!best || k > best.len || (k === best.len && dist < best.dist)) best = { i, len: k, end: j, dist };
       }
     }

@@ -1,4 +1,5 @@
 node_modules
 stt/.venv
+stt/models
 __pycache__
 dist

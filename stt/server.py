@@ -1,82 +1,122 @@
-"""Sidecar de voz: microfone -> corte por pausa -> faster-whisper -> WebSocket local.
+"""Sidecar de voz em streaming: microfone -> Vosk (pt + en juntos) -> WebSocket local.
 
-Evento enviado: {"text": str, "final": true, "t": segundos, "ms": tempo de transcrição}
-Uso: python server.py [--model small] [--lang pt] [--port 8791]
+Eventos: {"type":"partial"|"final","lang":"pt","text":"...","t":s}, {"type":"level","v":0..1},
+         {"type":"status","device":"...","langs":["pt","en"]}
+Uso: python server.py [--langs pt,en] [--device N] [--port 8791] [--wav arquivo.wav] [--list-devices]
 """
-import argparse, asyncio, json, queue, time
+import argparse, asyncio, json, os, queue, threading, time, wave
 import numpy as np
 import sounddevice as sd
 import websockets
-from faster_whisper import WhisperModel
+import vosk
 
+vosk.SetLogLevel(-1)
 SR = 16000
-BLOCK = 0.1  # s por bloco do microfone
-# shortcut: corte por energia (RMS), não por silero; trocar se ruído de fundo atrapalhar.
-RMS_VOICE = 0.012
-PAUSE = 0.45  # s de silêncio que fecha um segmento
-MAX_SEG = 6.0  # s, fecha mesmo sem pausa
+BLOCK = 800  # 50 ms: é o piso da latência de captura
+HERE = os.path.dirname(os.path.abspath(__file__))
+MODELS = {"pt": "vosk-model-small-pt-0.3", "en": "vosk-model-small-en-us-0.15"}
+
+
+def list_devices():
+    api = sd.default.hostapi
+    return [{"id": i, "name": d["name"]} for i, d in enumerate(sd.query_devices())
+            if d["max_input_channels"] > 0 and d["hostapi"] == api]
+
+
+def wav_blocks(path):
+    w = wave.open(path)
+    assert w.getframerate() == SR and w.getnchannels() == 1 and w.getsampwidth() == 2, "wav deve ser 16k mono 16-bit"
+    while True:
+        b = w.readframes(BLOCK)
+        if not b:
+            return
+        yield b
+        time.sleep(BLOCK / SR)  # simula tempo real
 
 
 async def main(a):
-    model = WhisperModel(a.model, device="cpu", compute_type="int8")
+    langs = [l for l in a.langs.split(",") if l in MODELS]
+    recs = {l: vosk.KaldiRecognizer(vosk.Model(os.path.join(HERE, "models", MODELS[l])), SR) for l in langs}
     clients: set = set()
-    audio: queue.Queue = queue.Queue()
+    q: queue.Queue = queue.Queue()
     loop = asyncio.get_running_loop()
     t0 = time.time()
+    device = a.device if a.device is None else int(a.device)
+    dev_name = "arquivo" if a.wav else sd.query_devices(device, "input")["name"]
 
-    def cb(indata, frames, ti, status):
-        audio.put(indata[:, 0].copy())
+    def send(obj):
+        msg = json.dumps(obj, ensure_ascii=False)
+        loop.call_soon_threadsafe(websockets.broadcast, clients, msg)
+        if obj["type"] != "level":
+            print(msg, flush=True)
 
-    def transcribe(buf: np.ndarray) -> str:
-        segs, _ = model.transcribe(
-            buf, language=a.lang, beam_size=1, vad_filter=True,
-            condition_on_previous_text=False,
-        )
-        return " ".join(s.text.strip() for s in segs).strip()
+    lq = {l: queue.Queue() for l in recs}
+    MAX_LAG = 6  # blocos (300 ms): o idioma que não é o falado engasga; descarta áudio velho em vez de atrasar
+
+    def dispatcher():
+        last_level = 0.0
+        while (b := q.get()) is not None:
+            now = time.time() - t0
+            if now - last_level > 0.1:
+                s = np.frombuffer(b, dtype=np.int16).astype(np.float32) / 32768
+                send({"type": "level", "v": round(min(1.0, float(np.sqrt(np.mean(s**2))) * 8), 3)})
+                last_level = now
+            for l in recs:
+                lq[l].put(b)
+
+    def decode(l):
+        r, last = recs[l], ""
+        while (b := lq[l].get()) is not None:
+            if lq[l].qsize() > MAX_LAG:
+                with lq[l].mutex:
+                    lq[l].queue.clear()
+                r.Reset()
+                last = ""
+                continue
+            now = time.time() - t0
+            if r.AcceptWaveform(b):
+                txt = json.loads(r.Result()).get("text", "")
+                if txt:
+                    send({"type": "final", "lang": l, "text": txt, "t": round(now, 2)})
+                last = ""
+            else:
+                txt = json.loads(r.PartialResult()).get("partial", "")
+                if txt and txt != last:
+                    last = txt
+                    send({"type": "partial", "lang": l, "text": txt, "t": round(now, 2)})
 
     async def handler(ws):
         clients.add(ws)
+        await ws.send(json.dumps({"type": "status", "device": dev_name, "langs": langs}))
         try:
             await ws.wait_closed()
         finally:
             clients.discard(ws)
 
-    async def pump():
-        buf, quiet, voiced = [], 0.0, False
-        while True:
-            try:
-                blk = audio.get_nowait()
-            except queue.Empty:
-                await asyncio.sleep(0.02)
-                continue
-            loud = float(np.sqrt(np.mean(blk**2))) > RMS_VOICE
-            if loud:
-                voiced, quiet = True, 0.0
-            elif voiced:
-                quiet += BLOCK
-            if voiced:
-                buf.append(blk)
-            size = len(buf) * BLOCK
-            if voiced and (quiet >= PAUSE or size >= MAX_SEG):
-                chunk, buf, quiet, voiced = np.concatenate(buf), [], 0.0, False
-                t = time.time()
-                text = await loop.run_in_executor(None, transcribe, chunk)
-                if text:
-                    msg = json.dumps({"text": text, "final": True, "t": round(t - t0, 2),
-                                      "ms": int((time.time() - t) * 1000)})
-                    websockets.broadcast(clients, msg)
-                    print(msg, flush=True)
-
-    with sd.InputStream(samplerate=SR, channels=1, dtype="float32",
-                        blocksize=int(SR * BLOCK), callback=cb):
-        async with websockets.serve(handler, "127.0.0.1", a.port):
-            print(f"pronto ws://127.0.0.1:{a.port}", flush=True)
-            await pump()
+    threading.Thread(target=dispatcher, daemon=True).start()
+    for l in recs:
+        threading.Thread(target=decode, args=(l,), daemon=True).start()
+    async with websockets.serve(handler, "127.0.0.1", a.port):
+        print(f"pronto ws://127.0.0.1:{a.port} mic={dev_name} langs={langs}", flush=True)
+        if a.wav:
+            await asyncio.sleep(2)  # dá tempo de um cliente conectar
+            await loop.run_in_executor(None, lambda: [q.put(b) for b in wav_blocks(a.wav)])
+            await asyncio.sleep(3)
+            return
+        with sd.RawInputStream(samplerate=SR, channels=1, dtype="int16", blocksize=BLOCK, device=device,
+                               callback=lambda d, f, t, s: q.put(bytes(d))):
+            await asyncio.Future()
 
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
-    p.add_argument("--model", default="small")
-    p.add_argument("--lang", default="pt")
+    p.add_argument("--langs", default="pt,en")
+    p.add_argument("--device", default=None)
     p.add_argument("--port", type=int, default=8791)
-    asyncio.run(main(p.parse_args()))
+    p.add_argument("--wav")
+    p.add_argument("--list-devices", action="store_true")
+    a = p.parse_args()
+    if a.list_devices:
+        print(json.dumps(list_devices(), ensure_ascii=False))
+    else:
+        asyncio.run(main(a))
