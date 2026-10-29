@@ -24,8 +24,10 @@ const NUM_WORDS = new Set(
 // roteiro (improviso ou erro) ou, com probabilidade bem pequena, saltar para qualquer ponto do texto.
 const P_STAY = 0.2; // palavra ouvida que não faz parte do roteiro
 const P_ADV = 0.62; // lê a próxima palavra
-const SKIP = 0.3; // custo de cada palavra do roteiro pulada (reconhecedor perdeu ou a pessoa cortou)
-const MAX_SKIP = 4;
+// custo de pular palavras do roteiro (o reconhecedor perdeu, ou a pessoa cortou um trecho): as primeiras
+// saem caras, depois o custo é quase plano, porque pular uma frase inteira não é muito mais raro que pular três palavras
+const skipCost = (k: number) => (k === 0 ? 1 : k === 1 ? 0.3 : k === 2 ? 0.12 : k <= 12 ? 0.06 : 0.004);
+const MAX_SKIP = 80;
 const EPS_JUMP = 0.001; // chance de pulo para longe; só vence com várias palavras seguidas confirmando
 const P_MATCH = 0.75; // chance de a palavra falada ser reconhecida como algo que soa igual
 
@@ -142,11 +144,13 @@ export class Aligner {
   // Prova de que a pessoa está em `j`: as últimas palavras ouvidas casam, em sequência, com as que
   // vêm logo antes de j (tolera uma palavra pulada no roteiro e até duas ouvidas fora do roteiro).
   private support(t: string[], j: number): number {
-    let s = 0, jj = j - 1, junk = 0, skips = 1, used = 0;
-    for (let i = t.length - 1; i >= 0 && jj >= 0 && used < 5; i--, used++) {
+    let s = 0, jj = j - 1, junk = 0, gaps = 2, used = 0;
+    for (let i = t.length - 1; i >= 0 && jj >= 0 && used < 6; i--, used++) {
       const h = t[i], { cnt } = this.em(h);
-      if (!this.isNum[jj] && phonSim(h, this.words[jj]) >= 0.8) { s += this.weight(h, cnt); jj--; }
-      else if (skips && jj > 0 && !this.isNum[jj - 1] && phonSim(h, this.words[jj - 1]) >= 0.8) { s += this.weight(h, cnt); jj -= 2; skips--; }
+      if (!this.isNum[jj] && phonSim(h, this.words[jj]) >= 0.8) { s += this.weight(h, cnt); jj--; continue; }
+      let g = 1;
+      if (gaps) for (; g <= 4 && jj - g >= 0; g++) if (!this.isNum[jj - g] && phonSim(h, this.words[jj - g]) >= 0.8) break;
+      if (gaps && g <= 4 && jj - g >= 0) { s += this.weight(h, cnt); jj -= g + 1; gaps--; }
       else if (++junk > 2) break;
     }
     return s;
@@ -163,6 +167,7 @@ export class Aligner {
     if (d > 0) {
       if (d <= 2) return sup >= (improv ? 1.5 : 0.4) ? j : this.pos;
       if (d <= 8) return conf >= 0.3 && sup >= 1.5 ? j : this.pos;
+      if (d <= 60) return conf >= 0.45 && sup >= 2.5 ? j : this.pos; // pular uma frase ou duas é comum
       return conf >= 0.6 && sup >= 3 ? j : this.pos;
     }
     return -d > 3 && conf >= 0.65 && sup >= 3 ? j : this.pos;
@@ -219,12 +224,12 @@ export class Aligner {
     const n = this.n, out = new Float64Array(n + 1);
     for (let j = 0; j <= n; j++) {
       const bj = b[j];
-      if (bj < 1e-300) continue;
+      if (bj < 1e-7) continue;
       out[j] += bj * P_STAY * bg;
-      let f = P_ADV;
+      let kk = 0; // palavras puladas de verdade (números escritos em dígitos não contam)
       for (let k = 0; k <= MAX_SKIP && j + 1 + k <= n; k++) {
-        out[j + 1 + k] += bj * f * e[j + k];
-        f *= this.isNum[j + k] ? 0.9 : SKIP;
+        out[j + 1 + k] += bj * P_ADV * skipCost(kk) * e[j + k];
+        if (!this.isNum[j + k]) kk++;
       }
     }
     const jm = this.jump / Math.max(1, n); // soma de b = 1

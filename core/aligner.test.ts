@@ -158,3 +158,40 @@ test("unk do modo guiado é ignorado", () => {
   say(a, "olá pessoal [unk] eu vou falar sobre produtividade");
   assert.equal(next(a), "primeiro");
 });
+
+test("marcadores de citação no roteiro não viram palavras nem travam o pulo", () => {
+  const txt = cleanScript(
+    "[[Ana]] abriu a loja de brinquedos no centro da cidade e cuidava de tudo sozinha.[web:6][web:8][web:12] " +
+      "Na reunião, depois de fecharem o balanço mensal, ela decidiu contratar duas pessoas para o atendimento.[1][web:3] Foi a melhor escolha.",
+  );
+  const a = new Aligner(txt);
+  assert.ok(!a.words.includes("web"));
+  say(a, "ana abriu a loja de brinquedos no centro da cidade e cuidava de tudo sozinha");
+  say(a, "reunião depois de fecharem o balanço mensal");
+  assert.equal(next(a), "ela");
+});
+
+test("pular uma frase inteira: acha a nova parte em poucas palavras", () => {
+  const a = new Aligner(script);
+  say(a, "olá pessoal hoje eu vou falar sobre produtividade primeiro organize o seu dia na véspera");
+  say(a, "quinto revise o que você conseguiu");
+  assert.equal(next(a), "fazer");
+});
+
+test("omitir palavras no meio da frase não faz perder o fio", () => {
+  const a = new Aligner(script);
+  say(a, "olá pessoal hoje eu vou falar sobre produtividade primeiro organize o seu dia na véspera");
+  say(a, "segundo escolha tarefa importante foque nela"); // cortou "uma única" e "e"
+  assert.equal(next(a), "ate");
+});
+
+test("pular e depois improvisar e depois voltar ao roteiro", () => {
+  const a = new Aligner(script);
+  say(a, "olá pessoal hoje eu vou falar sobre produtividade");
+  say(a, "terceiro desligue as notificações do celular");
+  const pos = a.pos;
+  say(a, "isso me lembra uma história engraçada de quando eu ainda trabalhava naquele escritório antigo");
+  assert.ok(a.pos - pos <= 1);
+  say(a, "quarto faça pausas curtas");
+  assert.equal(next(a), "para");
+});
