@@ -36,10 +36,24 @@
 <div class="row two"><span>Fonte</span><select id="fontFamily"></select></div>
 <div class="row two"><span>Cor do texto</span><input type="color" id="color"></div>
 
+<h2>Destaque do que você está lendo</h2>
+<div class="row two"><span>Estilo</span><select id="highlightMode"><option value="palavra">Só a palavra atual</option><option value="frase">A palavra atual e a frase toda</option></select></div>
+<div class="row two"><span>Cor do destaque</span><input type="color" id="highlightColor"></div>
+<div class="row"><span>Intensidade</span><input type="range" id="highlightOpacity" min="0" max="1" step="0.01"><output></output></div>
+<div class="row two"><span>Cor do texto destacado</span><input type="color" id="highlightTextColor"></div>
+<div class="row"><span>Já lido (visibilidade)</span><input type="range" id="pastOpacity" min="0" max="1" step="0.01"><output></output></div>
+<div class="row"><span>Ainda não lido</span><input type="range" id="futureOpacity" min="0" max="1" step="0.01"><output></output></div>
+<div class="row"><span>Antecipação (palavras)</span><input type="range" id="lead" min="0" max="4" step="1"><output></output></div>
+<div class="hint">Antecipação: enquanto você lê sem parar, o destaque acompanha o seu ritmo em vez de esperar o reconhecimento, que sempre chega um pouco depois. 0 desliga.</div>
+<div class="row"><span>Suavidade da rolagem</span><input type="range" id="scrollSmooth" min="0" max="600" step="10"><output></output></div>
+<div class="row"><span>Altura da linha atual</span><input type="range" id="anchor" min="0.1" max="0.8" step="0.05"><output></output></div>
+
 <h2>Janela</h2>
 <label class="chk"><input type="checkbox" id="showTaskbar"> Mostrar o ícone na barra de tarefas</label>
 <label class="chk"><input type="checkbox" id="showHeard"> Mostrar o que o microfone está ouvindo</label>
 <label class="chk"><input type="checkbox" id="protectCapture"> Esconder a janela de gravações e compartilhamento de tela</label>
+<label class="chk"><input type="checkbox" id="diagLog"> Guardar um registro do que foi ouvido (ajuda a achar erros)</label>
+<div class="btns"><button id="openlog">Mostrar a pasta do registro</button></div>
 <div class="hint">Atalhos: Ctrl+Alt+T clicar através · H ocultar · ←/→ pular frase · R voltar ao início · S abrir esta janela</div>
 
 <h2>Voz</h2>
@@ -70,14 +84,17 @@
 <script>
 const $ = (id) => document.getElementById(id);
 const FONTS = ["Segoe UI", "Arial", "Calibri", "Verdana", "Trebuchet MS", "Georgia", "Times New Roman", "Consolas"];
-const unit = { fontSize: "px", width: "px", lines: "", opacity: "" };
+const unit = { fontSize: "px", width: "px", lines: "", opacity: "", highlightOpacity: "", pastOpacity: "", futureOpacity: "", lead: " palavras", scrollSmooth: " ms", anchor: "" };
 
 (async () => {
   const { cfg, script, stt, upd, version } = await tp.get();
   window.ver = version; showUpd(upd);
   $("chk").onclick = () => tp.checkUpdate();
+  $("openlog").onclick = () => tp.openLog();
   $("inst").onclick = () => tp.installUpdate();
-  for (const k of ["fontSize", "lines", "width", "opacity"]) {
+  $("highlightMode").value = cfg.highlightMode; $("highlightMode").onchange = (e) => tp.set("highlightMode", e.target.value);
+  for (const k of ["highlightColor", "highlightTextColor"]) { $(k).value = cfg[k]; $(k).oninput = (e) => tp.set(k, e.target.value); }
+  for (const k of ["fontSize", "lines", "width", "opacity", "highlightOpacity", "pastOpacity", "futureOpacity", "lead", "scrollSmooth", "anchor"]) {
     const el = $(k), out = el.nextElementSibling;
     el.value = cfg[k]; out.textContent = cfg[k] + unit[k];
     el.oninput = () => { out.textContent = el.value + unit[k]; tp.set(k, +el.value); };
@@ -85,7 +102,7 @@ const unit = { fontSize: "px", width: "px", lines: "", opacity: "" };
   $("fontFamily").innerHTML = FONTS.map((f) => `<option>${f}</option>`).join("");
   $("fontFamily").value = cfg.fontFamily; $("fontFamily").onchange = (e) => tp.set("fontFamily", e.target.value);
   $("color").value = cfg.color; $("color").oninput = (e) => tp.set("color", e.target.value);
-  for (const k of ["showTaskbar", "showHeard", "protectCapture", "scriptMode"]) {
+  for (const k of ["showTaskbar", "showHeard", "protectCapture", "scriptMode", "diagLog"]) {
     $(k).checked = cfg[k]; $(k).onchange = (e) => tp.set(k, e.target.checked);
   }
   for (const l of ["pt", "en"]) {

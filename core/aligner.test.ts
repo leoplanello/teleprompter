@@ -142,6 +142,17 @@ test("dois idiomas ouvindo: o lixo do idioma errado não atrapalha", () => {
   assert.equal(next(a), "na");
 });
 
+test("idioma errado terminando primeiro não cala o idioma certo", () => {
+  const a = new Aligner(script);
+  a.feedStream("pt", "olá pessoal hoje eu vou", false);
+  a.feedStream("en", "hello pass well who may", false);
+  a.feedStream("en", "hello pass well who may", true); // o lixo em inglês fecha o trecho antes
+  a.feedStream("pt", "olá pessoal hoje eu vou falar sobre produtividade", false); // o português segue valendo
+  assert.equal(next(a), "primeiro");
+  a.feedStream("pt", "olá pessoal hoje eu vou falar sobre produtividade", true);
+  assert.equal(next(a), "primeiro");
+});
+
 test("unk do modo guiado é ignorado", () => {
   const a = new Aligner(script);
   say(a, "olá pessoal [unk] eu vou falar sobre produtividade");

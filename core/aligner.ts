@@ -105,14 +105,20 @@ export class Aligner {
     this.state = improv ? "improvising" : "following";
 
     if (final) {
-      this.g = best.b;
-      for (const l of Object.keys(this.toks)) {
-        if (l !== lang && this.toks[l].length) {
-          this.suppressed[l] = now;
-          this.committed[l] = l === best.lang ? best.t : this.toks[l];
+      if (best.lang === lang) {
+        // este idioma venceu: confirma, e o outro, se estiver no meio do mesmo trecho, não conta de novo
+        this.g = best.b;
+        for (const l of Object.keys(this.toks)) {
+          if (l !== lang && this.toks[l].length) {
+            this.suppressed[l] = now;
+            this.committed[l] = this.toks[l];
+          }
         }
+        this.toks = {};
+      } else {
+        // o idioma errado terminou primeiro: descarta o dele e deixa o vencedor continuar ao vivo
+        delete this.toks[lang];
       }
-      this.toks = {};
     }
     return this.pos;
   }
@@ -174,10 +180,11 @@ export class Aligner {
   }
 
   private apply(b0: Float64Array, toks: string[]) {
+    // z = quanto essas palavras são melhor explicadas pelo roteiro do que por "improviso" (ganho sobre ficar parado)
     let b = b0, z = 0;
     for (const h of toks) {
       const r = this.step(b, h);
-      b = r.b; z += r.logZ;
+      b = r.b; z += r.logZ - Math.log(P_STAY * this.em(h).bg);
     }
     return { b, z };
   }

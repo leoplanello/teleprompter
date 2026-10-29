@@ -41,9 +41,11 @@ def list_devices():
 def wav_blocks(path):
     w = wave.open(path)
     assert w.getframerate() == SR and w.getnchannels() == 1 and w.getsampwidth() == 2, "wav deve ser 16k mono 16-bit"
+    start, i = time.perf_counter(), 0
     while b := w.readframes(BLOCK):
         yield b
-        time.sleep(BLOCK / SR)  # simula tempo real
+        i += 1
+        time.sleep(max(0.0, start + i * BLOCK / SR - time.perf_counter()))  # tempo real sem acumular atraso
 
 
 def make_rec(model, lang, words):
@@ -107,16 +109,7 @@ async def main(a):
             if isinstance(b, tuple):  # ("grammar", palavras)
                 r, last = make_rec(models[l], l, b[1]), ""
                 continue
-            # atrasado: junta os blocos que já esperam numa chamada só (mesma voz, menos custo fixo)
-            while lq[l].qsize() > 2 and len(b) < BLOCK * 2 * 10:
-                try:
-                    nxt = lq[l].get_nowait()
-                except queue.Empty:
-                    break
-                if isinstance(nxt, tuple):
-                    lq[l].put(nxt)
-                    break
-                b += nxt
+            # um bloco por vez: juntar blocos faz o reconhecedor engolir o começo da fala depois de uma pausa
             now = time.time() - t0
             if r.AcceptWaveform(b):
                 txt = json.loads(r.Result()).get("text", "")
@@ -147,8 +140,8 @@ async def main(a):
     async with websockets.serve(handler, "127.0.0.1", a.port):
         print(f"pronto ws://127.0.0.1:{a.port} mic={dev_name} langs={langs}", flush=True)
         if a.wav:
-            await asyncio.sleep(2)  # dá tempo de um cliente conectar
-            print(f"feed_start {time.time() - t0:.2f}", flush=True)
+            await asyncio.sleep(a.wait)  # dá tempo de um cliente conectar
+            print(f"feed_start {time.time() - t0:.2f} epoch {time.time():.3f}", flush=True)
             await loop.run_in_executor(None, lambda: [q.put(b) for b in wav_blocks(a.wav)])
             print(f"feed_end {time.time() - t0:.2f}", flush=True)
             await asyncio.sleep(3)
@@ -164,6 +157,7 @@ if __name__ == "__main__":
     p.add_argument("--device", default=None)
     p.add_argument("--port", type=int, default=8791)
     p.add_argument("--wav")
+    p.add_argument("--wait", type=float, default=2)
     p.add_argument("--list-devices", action="store_true")
     a = p.parse_args()
     if a.list_devices:

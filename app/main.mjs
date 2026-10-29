@@ -1,5 +1,5 @@
-import { app, BrowserWindow, globalShortcut, dialog, ipcMain } from "electron";
-import { readFileSync, writeFileSync, existsSync, createWriteStream, unlinkSync } from "node:fs";
+import { app, BrowserWindow, globalShortcut, dialog, ipcMain, shell } from "electron";
+import { readFileSync, writeFileSync, existsSync, createWriteStream, unlinkSync, statSync, renameSync } from "node:fs";
 import { spawn, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { once } from "node:events";
@@ -17,6 +17,10 @@ const scriptPath = join(data, "script.txt");
 const defaults = {
   opacity: 0.55, fontSize: 34, color: "#ffffff", fontFamily: "Segoe UI", lines: 4, width: 900,
   protectCapture: false, showTaskbar: true, showHeard: true, scriptMode: true, device: null, langs: ["pt", "en"],
+  // destaque do que está sendo lido
+  highlightMode: "palavra", highlightColor: "#ffd54a", highlightOpacity: 0.85, highlightTextColor: "#111111",
+  pastOpacity: 0.35, futureOpacity: 0.85, lead: 2, scrollSmooth: 160, anchor: 0.3,
+  diagLog: true,
   wsUrl: "ws://127.0.0.1:8791", lastScript: "",
 };
 const cfg = { ...defaults, ...(existsSync(cfgPath) ? JSON.parse(readFileSync(cfgPath, "utf8")) : {}) };
@@ -27,9 +31,24 @@ const version = process.env.TP_FAKE_VERSION ?? app.getVersion(); // TP_FAKE_VERS
 app.commandLine.appendSwitch("disable-renderer-backgrounding");
 app.commandLine.appendSwitch("disable-background-timer-throttling");
 
-let win, settingsWin, aligner, scriptText = "", chunks = [], clickThrough = false, sttWs;
+let win, settingsWin, aligner, scriptText = "", chunks = [], clickThrough = false, sttWs, quitting = false;
 const stt = { connected: false, level: 0, heard: "", device: "", langs: [] };
-const send = (ch, payload) => { win?.webContents.send(ch, payload); settingsWin?.webContents.send(ch, payload); };
+// janela fechada/destruída (ao sair, ou ao fechar as configurações) não pode derrubar o app
+const to = (w, ch, payload) => { if (w && !w.isDestroyed() && !w.webContents.isDestroyed()) w.webContents.send(ch, payload); };
+const send = (ch, payload) => { to(win, ch, payload); to(settingsWin, ch, payload); };
+
+// registro para diagnóstico: o que foi ouvido e onde o app achou que você estava
+const logPath = join(data, "sessao.log");
+let logStream = null;
+function diag(line) {
+  if (!cfg.diagLog) return;
+  if (!logStream) {
+    try { if (existsSync(logPath) && statSync(logPath).size > 2_000_000) renameSync(logPath, logPath + ".old"); } catch {}
+    logStream = createWriteStream(logPath, { flags: "a" });
+    logStream.write(`\n--- ${new Date().toISOString()} v${version}\n`);
+  }
+  logStream.write(`${Date.now() % 1e7} ${line}\n`);
+}
 
 // ---------- roteiro ----------
 // palavras com acento, como o modelo de voz as conhece (o alinhador normaliza depois)
@@ -49,7 +68,7 @@ function loadScript(text, persist = true) {
     const k = tokenize(raw).length;
     if (k) { chunks.push({ t: raw, a: n, b: n + k, end: /[.!?…]["')]*$/.test(raw) }); n += k; }
   }
-  win?.webContents.send("script", chunks);
+  to(win, "script", chunks);
   pushPos(true);
   sendGrammar();
 }
@@ -65,9 +84,9 @@ let lastPos = -1, lastState = "";
 function pushPos(force = false) {
   if (!aligner || (!force && aligner.pos === lastPos && aligner.state === lastState)) return;
   lastPos = aligner.pos; lastState = aligner.state;
-  win?.webContents.send("pos", { pos: lastPos, state: lastState });
+  to(win, "pos", { pos: lastPos, state: lastState });
 }
-const pushCfg = () => win?.webContents.send("cfg", cfg);
+const pushCfg = () => to(win, "cfg", cfg);
 
 let lastSttPush = 0;
 function pushStt(force = false) {
@@ -101,11 +120,15 @@ function connectStt() {
     else if ((m.type === "partial" || m.type === "final") && aligner) {
       if (m.text) stt.heard = m.text;
       aligner.feedStream(m.lang, m.text, m.type === "final");
+      if (m.text || m.type === "final") diag(`${m.lang} ${m.type[0]} "${m.text}" -> pos=${aligner.pos} ${aligner.state}`);
       pushPos();
     }
     pushStt(m.type !== "level");
   };
-  ws.onclose = () => { stt.connected = false; pushStt(true); setTimeout(connectStt, 1000); };
+  ws.onclose = () => {
+    if (quitting) return;
+    stt.connected = false; pushStt(true); setTimeout(connectStt, 1000);
+  };
   ws.onerror = () => {};
 }
 
@@ -220,7 +243,7 @@ function applyCfg(key) {
 function setClickThrough(on) {
   clickThrough = on;
   win.setIgnoreMouseEvents(on, { forward: true });
-  win.webContents.send("click-through", on);
+  to(win, "click-through", on);
 }
 
 function openSettings() {
@@ -249,6 +272,7 @@ ipcMain.handle("update:check", () => checkUpdate());
 ipcMain.handle("update:install", () => installUpdate());
 ipcMain.on("open-settings", openSettings);
 ipcMain.on("quit", () => app.quit());
+ipcMain.handle("open-log-folder", () => shell.showItemInFolder(existsSync(logPath) ? logPath : cfgPath));
 
 app.whenReady().then(() => {
   win = new BrowserWindow({
@@ -282,5 +306,6 @@ app.whenReady().then(() => {
   setTimeout(() => checkUpdate(true), 4000);
 });
 
-app.on("will-quit", () => sidecar?.kill());
+app.on("before-quit", () => { quitting = true; });
+app.on("will-quit", () => { sidecar?.kill(); logStream?.end(); });
 app.on("window-all-closed", () => app.quit());
