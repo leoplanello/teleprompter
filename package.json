@@ -17,8 +17,9 @@
     "productName": "Teleprompter",
     "files": [
       "app/**",
-      "core/aligner.ts",
-      "package.json"
+      "core/*.ts",
+      "package.json",
+      "!core/*.test.ts"
     ],
     "win": {
       "icon": "build/icon.ico",
@@ -32,5 +33,5 @@
     }
   },
   "main": "app/main.mjs",
-  "version": "0.2.0"
+  "version": "0.2.1"
 }

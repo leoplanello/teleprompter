@@ -73,7 +73,7 @@ async def main(a):
             print(msg, flush=True)
 
     lq = {l: queue.Queue() for l in langs}
-    MAX_LAG = 8  # blocos (240 ms): se atrasar, descarta áudio velho em vez de acumular fila
+    MAX_LAG = 40  # blocos (1,2 s): só descarta áudio velho em último caso; antes disso junta blocos
 
     def dispatcher():
         boost(True)
@@ -107,11 +107,21 @@ async def main(a):
             if isinstance(b, tuple):  # ("grammar", palavras)
                 r, last = make_rec(models[l], l, b[1]), ""
                 continue
+            # atrasado: junta os blocos que já esperam numa chamada só (mesma voz, menos custo fixo)
+            while lq[l].qsize() > 2 and len(b) < BLOCK * 2 * 10:
+                try:
+                    nxt = lq[l].get_nowait()
+                except queue.Empty:
+                    break
+                if isinstance(nxt, tuple):
+                    lq[l].put(nxt)
+                    break
+                b += nxt
             now = time.time() - t0
             if r.AcceptWaveform(b):
                 txt = json.loads(r.Result()).get("text", "")
-                if txt:
-                    send({"type": "final", "lang": l, "text": txt, "t": round(now, 2)})
+                # final vazio também vai: o app usa para saber que o trecho acabou
+                send({"type": "final", "lang": l, "text": txt, "t": round(now, 2)})
                 last = ""
             else:
                 txt = json.loads(r.PartialResult()).get("partial", "")

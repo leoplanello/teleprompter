@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Aligner, tokenize } from "../core/aligner.ts";
+import { cleanScript } from "../core/text.ts";
 
 const REPO = "leoplanello/teleprompter";
 const here = dirname(fileURLToPath(import.meta.url));
@@ -34,16 +35,17 @@ const send = (ch, payload) => { win?.webContents.send(ch, payload); settingsWin?
 // palavras com acento, como o modelo de voz as conhece (o alinhador normaliza depois)
 const grammarWords = (text) => [...new Set(text.toLowerCase().split(/[^\p{L}\p{N}']+/u).filter((w) => w && !/^\d+$/.test(w)))];
 function sendGrammar() {
-  if (sttWs?.readyState === 1) sttWs.send(JSON.stringify({ cmd: "grammar", words: cfg.scriptMode ? grammarWords(scriptText) : [] }));
+  if (sttWs?.readyState === 1) sttWs.send(JSON.stringify({ cmd: "grammar", words: cfg.scriptMode ? grammarWords(cleanScript(scriptText)) : [] }));
 }
 
 function loadScript(text, persist = true) {
   scriptText = text;
   if (persist) writeFileSync(scriptPath, text);
-  aligner = new Aligner(text);
+  const shown = cleanScript(text); // símbolos e marcação não são lidos nem mostrados
+  aligner = new Aligner(shown);
   chunks = [];
   let n = 0;
-  for (const raw of text.split(/\s+/).filter(Boolean)) {
+  for (const raw of shown.split(/\s+/).filter(Boolean)) {
     const k = tokenize(raw).length;
     if (k) { chunks.push({ t: raw, a: n, b: n + k, end: /[.!?…]["')]*$/.test(raw) }); n += k; }
   }
@@ -97,7 +99,7 @@ function connectStt() {
     if (m.type === "level") stt.level = m.v;
     else if (m.type === "status") { stt.connected = true; stt.device = m.device; stt.langs = m.langs; }
     else if ((m.type === "partial" || m.type === "final") && aligner) {
-      stt.heard = m.text;
+      if (m.text) stt.heard = m.text;
       aligner.feedStream(m.lang, m.text, m.type === "final");
       pushPos();
     }
