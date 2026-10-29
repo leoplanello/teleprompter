@@ -19,7 +19,7 @@ const defaults = {
   protectCapture: false, showTaskbar: true, showHeard: true, scriptMode: true, device: null, langs: ["pt", "en"],
   // destaque do que está sendo lido
   highlightMode: "palavra", highlightColor: "#ffd54a", highlightOpacity: 0.85, highlightTextColor: "#111111",
-  pastOpacity: 0.35, futureOpacity: 0.85, lead: 2, scrollSmooth: 160, anchor: 0.3,
+  pastOpacity: 0.35, futureOpacity: 0.85, lead: 3, scrollSmooth: 160, anchor: 0.3,
   diagLog: true,
   wsUrl: "ws://127.0.0.1:8791", lastScript: "",
 };
@@ -133,7 +133,13 @@ function connectStt() {
 }
 
 // shortcut: caminho fixo da versão pessoal (venv fica fora do .exe); no SaaS, empacotar o motor.
-const sttDir = process.env.TELEPROMPTER_STT ?? "E:\\Projetos\\teleprompter\\stt";
+// procura a pasta stt: variável, ao lado do repositório (dev), ao lado do .exe portátil, ou o local pessoal conhecido
+const sttDir = [
+  process.env.TELEPROMPTER_STT,
+  join(here, "..", "stt"),
+  join(process.env.PORTABLE_EXECUTABLE_DIR ?? dirname(app.getPath("exe")), "stt"),
+  "E:\\1CODE\\teleprompter\\stt",
+].find((d) => d && existsSync(join(d, ".venv"))) ?? join(here, "..", "stt");
 const py = () => join(sttDir, ".venv", "Scripts", "python.exe");
 let sidecar;
 

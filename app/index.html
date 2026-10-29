@@ -39,7 +39,9 @@
 </div>
 <script>
 const $ = (id) => document.getElementById(id), text = $("text"), inner = $("inner");
-let cfg = { lead: 2, scrollSmooth: 160, anchor: 0.3, highlightMode: "palavra", showHeard: true };
+// ajustado com a gravação real: a leitura segue o ritmo e o destaque fica um pouco à frente
+const AHEAD_MS = 250; // antecipa o destaque pelo tempo típico de confirmação do reconhecedor
+let cfg = { lead: 3, scrollSmooth: 160, anchor: 0.3, highlightMode: "palavra", showHeard: true };
 let chunks = [], spans = [], sentOf = [], sentLo = [], sentHi = [], total = 0;
 let state = "following", connected = false;
 // posição confirmada pelo reconhecedor (conf) e a mostrada (disp): a mostrada se antecipa pela velocidade de leitura
@@ -102,7 +104,7 @@ tp.onPos(({ pos, state: st }) => {
   state = st; dot();
   if (pos > conf) {
     hist.push([now, pos]);
-    while (hist.length && now - hist[0][0] > 2500) hist.shift();
+    while (hist.length && now - hist[0][0] > 3500) hist.shift();
     const [t0, p0] = hist[0];
     if (now - t0 >= 500 && pos > p0) vel = Math.min(6, Math.max(0.8, (pos - p0) / ((now - t0) / 1000)));
     lastProg = now;
@@ -134,8 +136,8 @@ function frame(now) {
   const dt = Math.min(0.1, (now - lastFrame) / 1000); lastFrame = now;
   if (!spans.length) return;
   // antecipação: enquanto você está lendo sem parar, o destaque anda na sua velocidade e não espera a confirmação
-  const reading = cfg.lead > 0 && state === "following" && now - lastProg < 1400;
-  const target = conf + (reading ? Math.min(cfg.lead, (vel * (now - confT)) / 1000) : 0);
+  const reading = cfg.lead > 0 && state === "following" && now - lastProg < 3000;
+  const target = conf + (reading ? Math.min(cfg.lead, (vel * (now - confT + AHEAD_MS)) / 1000) : 0);
   disp = target >= disp ? target : Math.max(target, disp - dt * 3);
   setCur(chunkOf(Math.min(total - 1, Math.floor(disp + 1e-6))));
 

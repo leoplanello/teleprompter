@@ -3,3 +3,4 @@ stt/.venv
 stt/models
 __pycache__
 dist
+stt/*.wav
